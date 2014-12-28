@@ -72,18 +72,18 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 			if frontend.TLSCrt != "" || frontend.TLSKey != "" {
 				cert, err := b64.StdEncoding.DecodeString(frontend.TLSCrt)
 				if err != nil {
-					log.Printf("Failed to decode certificate '%v': %v", frontend.Route, err)
+					log.Printf("Failed to decode certificate '%v': %v", frontend.Hosts, err)
 					continue
 				}
 				key, err := b64.StdEncoding.DecodeString(frontend.TLSKey)
 				if err != nil {
-					log.Printf("Failed to decode key '%v': %v", frontend.Route, err)
+					log.Printf("Failed to decode key '%v': %v", frontend.Hosts, err)
 					continue
 				}
 				log.Printf("%s %s", cert, key)
 				cfg, err := loadTLSConfig(cert, key)
 				if err != nil {
-					log.Printf("Failed to load TLS configuration for frontend '%v': %v", frontend.Route, err)
+					log.Printf("Failed to load TLS configuration for frontend '%v': %v", frontend.Hosts, err)
 					continue
 				}
 				frontend.tlsConfig = cfg

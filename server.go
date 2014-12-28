@@ -28,11 +28,6 @@ type Server struct {
 	ready   chan int
 }
 
-func (s *Server) Match(host, route string) bool {
-	s.Printf("Match %s %s", host, route)
-	return true
-}
-
 func (s *Server) Run(frontends []*Frontend) error {
 	// bind a port to handle TLS connections
 	l, err := net.Listen("tcp", s.Listen)
@@ -59,26 +54,26 @@ func (s *Server) Run(frontends []*Frontend) error {
 	// wait for all frontends to finish
 	s.wait.Add(len(frontends))
 
-	var host string = "mindy.dev"
-
 	// setup muxing for each frontend
 	for _, frontend := range frontends {
 		var fl net.Listener
 		var err error
 
-		if s.Secure && frontend.isSecure() {
-			fl, err = s.muxTLS.Listen(host)
-		} else {
-			fl, err = s.muxHTTP.Listen(host)
-		}
+		for _, host := range frontend.Hosts {
+			if s.Secure && frontend.isSecure() {
+				fl, err = s.muxTLS.Listen(host)
+			} else {
+				fl, err = s.muxHTTP.Listen(host)
+			}
 
-		if err != nil {
-			s.Printf("Failed to mux listen: %s", err)
-			return err
-		}
+			if err != nil {
+				s.Printf("Failed to mux listen: %s", err)
+				return err
+			}
 
-		// proxy the connection to an backend
-		go s.runFrontend(host, frontend, fl)
+			// proxy the connection to an backend
+			go s.runFrontend(host, frontend, fl)
+		}
 	}
 
 	// custom error handler so we can log errors
@@ -127,9 +122,6 @@ func (s *Server) runFrontend(host string, frontend *Frontend, fl net.Listener) {
 		log.Printf("%d", 1)
 		// accept next connection to this frontend
 		conn, err := fl.Accept()
-
-		// if s.Match(host, frontend.Route) {
-		// }
 
 		if err != nil {
 			s.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())

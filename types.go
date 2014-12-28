@@ -20,10 +20,10 @@ type Backend struct {
 }
 
 type Frontend struct {
-	Route    string `json:"route"`
-	Strategy string `json:"strategy"`
-	TLSCrt   string `json:"tls_crt"`
-	TLSKey   string `json:"tls_key"`
+	Hosts    []string `json:"hosts"`
+	Strategy string   `json:"strategy"`
+	TLSCrt   string   `json:"tls_crt"`
+	TLSKey   string   `json:"tls_key"`
 
 	muxTLS    *vhost.TLSMuxer
 	muxHTTP   *vhost.HTTPMuxer
