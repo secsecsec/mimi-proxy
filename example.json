@@ -1,14 +1,23 @@
 {
     "insecure_bind_addr": ":80",
     "secure_bind_addr": ":443",
-    "frontends": {
-        "mindy.dev": {
-            "tls_crt": "./mindy.dev.cert",
-            "tls_key": "./mindy.dev.key",
+    "error_page": "templates/error.html",
+    "apps": {
+        "a1": {
+            "frontends": {
+                "mindy.dev": {
+                    "tls_crt": "./mindy.dev.cert",
+                    "tls_key": "./mindy.dev.key"
+                }
+            },
             "backends": [{
                 "addr": "127.0.0.1:3000",
                 "connect_timeout": 1000
             }]
         }
-    }
+    },
+    "etcd_key": "apps",
+    "etcd_servers": [
+        "http://127.0.0.1:4001"
+    ]
 }

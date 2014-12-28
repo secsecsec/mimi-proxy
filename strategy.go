@@ -15,3 +15,7 @@ func (s *RoundRobinStrategy) NextBackend() Backend {
 		return s.backends[s.idx]
 	}
 }
+
+type BackendStrategy interface {
+	NextBackend() Backend
+}
