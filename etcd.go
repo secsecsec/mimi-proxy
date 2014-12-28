@@ -28,7 +28,6 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 
 	for _, n := range r.Node.Nodes {
 		appId := n.Key[strings.LastIndex(n.Key, "/")+1:]
-		log.Printf("%s", appId)
 
 		backendsEtcd, err := client.Get("/"+etcdKey+"/"+appId+"/backends", true, false)
 		if err != nil {
@@ -37,7 +36,6 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 
 		for _, t := range backendsEtcd.Node.Nodes {
 			backendId := t.Key[strings.LastIndex(t.Key, "/")+1:]
-			log.Printf("%s", backendId)
 
 			if _, ok := backends[appId]; !ok {
 				backends[appId] = []Backend{}
@@ -66,7 +64,6 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 
 		for _, t := range frontendsEtcd.Node.Nodes {
 			frontendId := t.Key[strings.LastIndex(t.Key, "/")+1:]
-			log.Printf("%s", frontendId)
 
 			if _, ok := frontends[appId]; !ok {
 				frontends[appId] = []*Frontend{}
@@ -101,7 +98,6 @@ func initializeApplications(frontendsRaw map[string][]*Frontend) (secureFrontend
 	for _, frontends := range frontendsRaw {
 		for _, front := range frontends {
 
-			log.Printf("%v", front.backends == nil)
 			for _, back := range front.backends {
 				if back.ConnectTimeout == 0 {
 					back.ConnectTimeout = defaultConnectTimeout

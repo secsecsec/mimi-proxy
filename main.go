@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"time"
 )
 
 var config = struct {
@@ -49,7 +48,6 @@ func main() {
 	frontends := ResolveApps(etcdClient, config.EtcdKey)
 	secureFrontends, insecureFrontends := initializeApplications(frontends)
 
-	// run server
 	secureServer := &Server{
 		Listen:    config.SecureBindAddr,
 		Secure:    true,
@@ -58,8 +56,8 @@ func main() {
 		Logger:    log.New(os.Stdout, "secure ", log.LstdFlags|log.Lshortfile),
 	}
 
+	// Start secure (:443 port) server
 	go func() {
-		// this blocks unless there's a startup error
 		err = secureServer.Run()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
@@ -67,7 +65,6 @@ func main() {
 		}
 	}()
 
-	// run server
 	insecureServer := &Server{
 		Listen:    config.InsecureBindAddr,
 		Secure:    false,
@@ -76,8 +73,8 @@ func main() {
 		Logger:    log.New(os.Stdout, "insecure ", log.LstdFlags|log.Lshortfile),
 	}
 
+	// Start insecure (:80 port) server
 	go func() {
-		// this blocks unless there's a startup error
 		err = insecureServer.Run()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
@@ -85,17 +82,8 @@ func main() {
 		}
 	}()
 
-	go func() {
-		time.Sleep(time.Second * 3)
-		log.Printf("Stop")
-		collection.Frontends["id1"].Stop()
-	}()
-
-	go func() {
-		time.Sleep(time.Second * 6)
-		log.Printf("Start")
-		collection.Frontends["id1"].Start()
-	}()
+	// Watch new applications / frontends / backends in etcd server
+	go watchApps(etcdClient, config.EtcdKey)
 
 	apiServer := &ApiServer{
 		EnableCheckAlive: true,
