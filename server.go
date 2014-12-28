@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"strings"
 	"sync"
 	"time"
 )
@@ -57,101 +56,64 @@ func (s *Server) Run(frontends []*Frontend) error {
 		}
 	}
 
-	for {
-		// accept next connection to this frontend
-		conn, err := l.Accept()
+	// wait for all frontends to finish
+	s.wait.Add(len(frontends))
+
+	var host string = "mindy.dev"
+
+	// setup muxing for each frontend
+	for _, frontend := range frontends {
+		var fl net.Listener
+		var err error
+
+		if s.Secure && frontend.isSecure() {
+			fl, err = s.muxTLS.Listen(host)
+		} else {
+			fl, err = s.muxHTTP.Listen(host)
+		}
+
 		if err != nil {
-			s.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
-			if e, ok := err.(net.Error); ok {
-				if e.Temporary() {
+			s.Printf("Failed to mux listen: %s", err)
+			return err
+		}
+
+		// proxy the connection to an backend
+		go s.runFrontend(host, frontend, fl)
+	}
+
+	// custom error handler so we can log errors
+	go func() {
+		var err error
+		var conn net.Conn
+
+		for {
+			if s.Secure {
+				conn, err = s.muxTLS.NextError()
+			} else {
+				conn, err = s.muxHTTP.NextError()
+			}
+
+			if conn == nil {
+				s.Printf("Failed to mux next connection, error: %v", err)
+				if _, ok := err.(vhost.Closed); ok {
+					return
+				} else {
 					continue
 				}
-			}
-			continue
-		}
-
-		if len(frontends) == 0 {
-			conn.Close()
-			continue
-		}
-
-		var host string
-		if s.Secure {
-			vhostConn, err := vhost.TLS(conn)
-			if err != nil {
-				log.Printf("Not a valid http connection")
-				conn.Close()
-			}
-			host = strings.ToLower(vhostConn.Host())
-			vhostConn.Free()
-		} else {
-			vhostConn, err := vhost.HTTP(conn)
-			if err != nil {
-				log.Printf("Not a valid http connection")
-				conn.Close()
-			}
-			host = strings.ToLower(vhostConn.Host())
-			vhostConn.Free()
-		}
-
-		// setup muxing for each frontend
-		for _, frontend := range frontends {
-			var fl net.Listener
-			var err error
-
-			if s.Secure && frontend.isSecure() {
-				fl, err = s.muxTLS.Listen(host)
 			} else {
-				fl, err = s.muxHTTP.Listen(host)
-			}
-
-			if err != nil {
-				s.Printf("Failed to mux listen: %s", err)
-				return err
-			}
-
-			if s.Match(host, frontend.Route) {
-				// wait for all frontends to finish
-				s.wait.Add(1)
-				// proxy the connection to an backend
-				go s.runFrontend(host, frontend, fl)
+				s.Printf("Failed to mux connection from %v, error: %v", conn.RemoteAddr(), err)
+				// XXX: respond with valid TLS close messages
+				conn.Close()
 			}
 		}
+	}()
 
-		// custom error handler so we can log errors
-		go func() {
-			var err error
-			var conn net.Conn
-
-			for {
-				if s.Secure {
-					conn, err = s.muxTLS.NextError()
-				} else {
-					conn, err = s.muxHTTP.NextError()
-				}
-
-				if conn == nil {
-					s.Printf("Failed to mux next connection, error: %v", err)
-					if _, ok := err.(vhost.Closed); ok {
-						return
-					} else {
-						continue
-					}
-				} else {
-					s.Printf("Failed to mux connection from %v, error: %v", conn.RemoteAddr(), err)
-					// XXX: respond with valid TLS close messages
-					conn.Close()
-				}
-			}
-		}()
-
-		// we're ready, signal it for testing
-		if s.ready != nil {
-			close(s.ready)
-		}
-
-		s.wait.Wait()
+	// we're ready, signal it for testing
+	if s.ready != nil {
+		close(s.ready)
 	}
+
+	s.wait.Wait()
 
 	return nil
 }
@@ -160,32 +122,24 @@ func (s *Server) runFrontend(host string, frontend *Frontend, fl net.Listener) {
 	// mark finished when done so Run() can return
 	defer s.wait.Done()
 
-	wait := sync.WaitGroup{}
-
 	s.Printf("Handling connections to %v", host)
 	for {
 		log.Printf("%d", 1)
 		// accept next connection to this frontend
 		conn, err := fl.Accept()
 
-		wait.Wait()
-		log.Printf("%d", 2)
+		// if s.Match(host, frontend.Route) {
+		// }
+
 		if err != nil {
-			log.Printf("%d", 3)
 			s.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
-			log.Printf("%d", 4)
 			if e, ok := err.(net.Error); ok {
-				log.Printf("%d", 5)
 				if e.Temporary() {
-					log.Printf("%d", 6)
 					continue
 				}
-				log.Printf("%d", 7)
 			}
-			log.Printf("%d", 8)
 			continue
 		}
-		log.Printf("%d", 9)
 		s.Printf("Accepted new connection for %v from %v", host, conn.RemoteAddr())
 
 		// proxy the connection to an backend
