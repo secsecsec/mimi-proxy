@@ -8,7 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"time"
+	// "time"
 )
 
 const (
@@ -94,10 +94,10 @@ func main() {
 		}
 	}()
 
-	go func() {
-		time.Sleep(3 * time.Second)
-		collection.Frontends["id1"].Stop()
-	}()
+	// go func() {
+	// 	time.Sleep(3 * time.Second)
+	// 	collection.Frontends["id1"].Stop()
+	// }()
 
 	apiServer := &ApiServer{
 		EnableCheckAlive: true,

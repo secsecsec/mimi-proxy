@@ -57,7 +57,7 @@ func (s *Server) ListenAndServe() error {
 	// setup muxing for each frontend
 	for _, frontend := range s.Frontends {
 		frontend.server = s
-		frontend.Create(true)
+		go frontend.Create(true)
 	}
 
 	// custom error handler so we can log errors
@@ -74,24 +74,31 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) ErrorHandler() {
-	var err error
-	var conn net.Conn
-
+	s.Printf("Start error handler")
 	for {
+		var err error
+		var conn net.Conn
+
 		if s.Secure {
 			conn, err = s.muxTLS.NextError()
 		} else {
 			conn, err = s.muxHTTP.NextError()
 		}
 
-		if conn == nil {
-			s.Printf("Failed to mux next connection, error: %v", err)
-			if _, ok := err.(vhost.Closed); ok {
-				return
-			} else {
-				continue
+		switch err.(type) {
+		case vhost.BadRequest:
+			s.Printf("got a bad request!")
+		case vhost.NotFound:
+			s.Printf("got a connection for an unknown vhost")
+		case vhost.Closed:
+			s.Printf("Closed conn: %s", err)
+		default:
+			if conn != nil {
+				s.Printf("Unknown server error")
 			}
-		} else {
+		}
+
+		if conn != nil {
 			s.Printf("Failed to mux connection from %v, error: %v", conn.RemoteAddr(), err)
 			// XXX: respond with valid TLS close messages
 			conn.Close()
