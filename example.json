@@ -1,4 +1,5 @@
 {
+    "api_server_addr": "127.0.0.1:8586",
     "insecure_bind_addr": ":80",
     "secure_bind_addr": ":443",
     "error_page": "templates/error.html",

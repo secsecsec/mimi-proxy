@@ -7,6 +7,10 @@ import (
 	"log"
 )
 
+const (
+	defaultConnectTimeout = 10000 // milliseconds
+)
+
 func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 	var backends = make(map[string][]Backend)
 	var frontends = make(map[string][]*Frontend)
@@ -93,4 +97,40 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 	}
 
 	return frontends
+}
+
+func initializeApplications(frontendsRaw map[string][]*Frontend) (secureFrontends []*Frontend, insecureFrontends []*Frontend) {
+	for _, frontends := range frontendsRaw {
+		for _, front := range frontends {
+
+			log.Printf("%v", front.backends == nil)
+			for _, back := range front.backends {
+				if back.ConnectTimeout == 0 {
+					back.ConnectTimeout = defaultConnectTimeout
+				}
+
+				if back.Url == "" {
+					log.Printf("You must specify an addr for each backend on frontend '%v'", front)
+					continue
+				}
+			}
+
+			insecureFrontends = append(insecureFrontends, front)
+			if front.isSecure() {
+				secureFrontends = append(secureFrontends, front)
+			}
+		}
+	}
+
+	return secureFrontends, insecureFrontends
+}
+
+func watchApps(client *etcd.Client, etcdKey string) {
+	for {
+		resp, err := client.Watch("/"+etcdKey, 0, true, nil, nil)
+		if err != nil {
+			panic(err)
+		}
+		log.Printf("%s %s", resp.Node.Key, resp.Node.Value)
+	}
 }

@@ -9,41 +9,22 @@ import (
 	"os"
 )
 
-const (
-	defaultConnectTimeout = 10000 // milliseconds
-)
+var config = struct {
+	ApiServerAddr    string               `json:"api_server_addr"`
+	SecureBindAddr   string               `json:"secure_bind_addr"`
+	InsecureBindAddr string               `json:"insecure_bind_addr"`
+	Frontends        map[string]*Frontend `json:"frontends"`
+	EtcdKey          string               `json:"etcd_key"`
+	EtcdServers      []string             `json:"etcd_servers"`
+	ErrorPage        string               `json:"error_page"`
+}{}
+
+var etcdClient *etcd.Client
 
 func init() {
 	easyconfig.Parse("./example.json", &config)
+	etcdClient = etcd.NewClient(config.EtcdServers)
 }
-
-func initializeApplications(frontendsRaw map[string][]*Frontend) (secureFrontends []*Frontend, insecureFrontends []*Frontend) {
-	for _, frontends := range frontendsRaw {
-		for _, front := range frontends {
-
-			log.Printf("%v", front.backends == nil)
-			for _, back := range front.backends {
-				if back.ConnectTimeout == 0 {
-					back.ConnectTimeout = defaultConnectTimeout
-				}
-
-				if back.Url == "" {
-					log.Printf("You must specify an addr for each backend on frontend '%v'", front)
-					continue
-				}
-			}
-
-			insecureFrontends = append(insecureFrontends, front)
-			if front.isSecure() {
-				secureFrontends = append(secureFrontends, front)
-			}
-		}
-	}
-
-	return secureFrontends, insecureFrontends
-}
-
-var etcdClient *etcd.Client
 
 func main() {
 	var err error
@@ -55,43 +36,50 @@ func main() {
 		}
 	}
 
-	etcdClient = etcd.NewClient(config.EtcdServers)
+	// watchApps(etcdClient, config.EtcdKey)
+	// os.Exit(0)
+
 	frontends := ResolveApps(etcdClient, config.EtcdKey)
 	secureFrontends, insecureFrontends := initializeApplications(frontends)
 
-	go func() {
-		// run server
-		secureServer := &Server{
-			Listen:    config.SecureBindAddr,
-			Secure:    true,
-			ErrorPage: string(errorPage),
-			Logger:    log.New(os.Stdout, "slt ", log.LstdFlags|log.Lshortfile),
-		}
+	// run server
+	secureServer := &Server{
+		Listen:    config.SecureBindAddr,
+		Secure:    true,
+		ErrorPage: string(errorPage),
+		Frontends: secureFrontends,
+		Logger:    log.New(os.Stdout, "secure ", log.LstdFlags|log.Lshortfile),
+	}
 
+	go func() {
 		// this blocks unless there's a startup error
-		err = secureServer.Run(secureFrontends)
+		err = secureServer.Run()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
 			os.Exit(1)
 		}
 	}()
 
-	go func() {
-		// run server
-		insecureServer := &Server{
-			Listen:    config.InsecureBindAddr,
-			Secure:    false,
-			ErrorPage: string(errorPage),
-			Logger:    log.New(os.Stdout, "slt ", log.LstdFlags|log.Lshortfile),
-		}
+	// run server
+	insecureServer := &Server{
+		Listen:    config.InsecureBindAddr,
+		Secure:    false,
+		ErrorPage: string(errorPage),
+		Frontends: insecureFrontends,
+		Logger:    log.New(os.Stdout, "insecure ", log.LstdFlags|log.Lshortfile),
+	}
 
+	go func() {
 		// this blocks unless there's a startup error
-		err = insecureServer.Run(insecureFrontends)
+		err = insecureServer.Run()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
 			os.Exit(1)
 		}
 	}()
 
-	checkAlive()
+	apiServer := &ApiServer{
+		EnableCheckAlive: true,
+	}
+	apiServer.Run(config.ApiServerAddr)
 }

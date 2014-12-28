@@ -1,10 +1,7 @@
 package main
 
 import (
-	"crypto/tls"
-	"fmt"
 	vhost "github.com/inconshreveable/go-vhost"
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -23,19 +20,20 @@ type Server struct {
 	ErrorPage string
 
 	// these are for easier testing
-	muxTLS  *vhost.TLSMuxer
-	muxHTTP *vhost.HTTPMuxer
-	ready   chan int
+	Frontends []*Frontend
+	muxTLS    *vhost.TLSMuxer
+	muxHTTP   *vhost.HTTPMuxer
+	ready     chan int
 }
 
-func (s *Server) Run(frontends []*Frontend) error {
+func (s *Server) Run() error {
 	// bind a port to handle TLS connections
 	l, err := net.Listen("tcp", s.Listen)
 	if err != nil {
 		return err
 	}
 
-	s.Printf("Serving connections on %v, frontends: %d", l.Addr(), len(frontends))
+	s.Printf("Serving connections on %v, frontends: %d", l.Addr(), len(s.Frontends))
 
 	if s.Secure {
 		// start muxing on it
@@ -51,57 +49,17 @@ func (s *Server) Run(frontends []*Frontend) error {
 		}
 	}
 
-	// wait for all frontends to finish
-	s.wait.Add(len(frontends))
+	// wait for all s.Frontends to finish
+	s.wait.Add(len(s.Frontends))
 
 	// setup muxing for each frontend
-	for _, frontend := range frontends {
-		var fl net.Listener
-		var err error
-
-		for _, host := range frontend.Hosts {
-			if s.Secure && frontend.isSecure() {
-				fl, err = s.muxTLS.Listen(host)
-			} else {
-				fl, err = s.muxHTTP.Listen(host)
-			}
-
-			if err != nil {
-				s.Printf("Failed to mux listen: %s", err)
-				return err
-			}
-
-			// proxy the connection to an backend
-			go s.runFrontend(host, frontend, fl)
-		}
+	for _, frontend := range s.Frontends {
+		frontend.server = s
+		frontend.Start()
 	}
 
 	// custom error handler so we can log errors
-	go func() {
-		var err error
-		var conn net.Conn
-
-		for {
-			if s.Secure {
-				conn, err = s.muxTLS.NextError()
-			} else {
-				conn, err = s.muxHTTP.NextError()
-			}
-
-			if conn == nil {
-				s.Printf("Failed to mux next connection, error: %v", err)
-				if _, ok := err.(vhost.Closed); ok {
-					return
-				} else {
-					continue
-				}
-			} else {
-				s.Printf("Failed to mux connection from %v, error: %v", conn.RemoteAddr(), err)
-				// XXX: respond with valid TLS close messages
-				conn.Close()
-			}
-		}
-	}()
+	go s.ErrorHandler()
 
 	// we're ready, signal it for testing
 	if s.ready != nil {
@@ -113,96 +71,28 @@ func (s *Server) Run(frontends []*Frontend) error {
 	return nil
 }
 
-func (s *Server) runFrontend(host string, frontend *Frontend, fl net.Listener) {
-	// mark finished when done so Run() can return
-	defer s.wait.Done()
+func (s *Server) ErrorHandler() {
+	var err error
+	var conn net.Conn
 
-	s.Printf("Handling connections to %v", host)
 	for {
-		log.Printf("%d", 1)
-		// accept next connection to this frontend
-		conn, err := fl.Accept()
-
-		if err != nil {
-			s.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
-			if e, ok := err.(net.Error); ok {
-				if e.Temporary() {
-					continue
-				}
-			}
-			continue
-		}
-		s.Printf("Accepted new connection for %v from %v", host, conn.RemoteAddr())
-
-		// proxy the connection to an backend
-		go s.proxyConnection(host, conn, frontend)
-	}
-}
-
-func (s *Server) proxyConnection(host string, c net.Conn, frontend *Frontend) (err error) {
-	// unwrap if tls cert/key was specified
-	if frontend.isSecure() { //
 		if s.Secure {
-			c = tls.Server(c, frontend.tlsConfig)
+			conn, err = s.muxTLS.NextError()
 		} else {
-			// Redirect to secure host
-			fmt.Fprintf(c, `HTTP/1.0 301 Moved Permanently
-Location: https://%s
-`, host)
-			c.Close()
-			return nil
+			conn, err = s.muxHTTP.NextError()
+		}
+
+		if conn == nil {
+			s.Printf("Failed to mux next connection, error: %v", err)
+			if _, ok := err.(vhost.Closed); ok {
+				return
+			} else {
+				continue
+			}
+		} else {
+			s.Printf("Failed to mux connection from %v, error: %v", conn.RemoteAddr(), err)
+			// XXX: respond with valid TLS close messages
+			conn.Close()
 		}
 	}
-
-	// pick the backend
-	backend := frontend.strategy.NextBackend()
-
-	// dial the backend
-	upConn, err := net.DialTimeout("tcp", backend.Url, time.Duration(backend.ConnectTimeout)*time.Millisecond)
-	if err != nil {
-		s.Printf("Failed to dial backend connection %v: %v", backend.Url, err)
-		if s.ErrorPage != "" {
-			fmt.Fprintf(c, `HTTP/1.0 200
-Content-Length: %d
-Content-Type: text/html; charset=utf-8
-
-%s
-`, len(s.ErrorPage), s.ErrorPage)
-		}
-		c.Close()
-		return
-	}
-	s.Printf("Initiated new connection to backend: %v %v", upConn.LocalAddr(), upConn.RemoteAddr())
-
-	// join the connections
-	s.joinConnections(c, upConn)
-	return
-}
-
-func (s *Server) joinConnections(c1 net.Conn, c2 net.Conn) {
-	var wg sync.WaitGroup
-	halfJoin := func(dst net.Conn, src net.Conn) {
-		defer wg.Done()
-		defer dst.Close()
-		defer src.Close()
-		n, err := io.Copy(dst, src)
-		s.Printf("Copy from %v to %v failed after %d bytes with error %v", src.RemoteAddr(), dst.RemoteAddr(), n, err)
-	}
-
-	s.Printf("Joining connections: %v %v", c1.RemoteAddr(), c2.RemoteAddr())
-	wg.Add(2)
-	go halfJoin(c1, c2)
-	go halfJoin(c2, c1)
-	wg.Wait()
-}
-
-func loadTLSConfig(cert, key []byte) (*tls.Config, error) {
-	certificate, err := tls.X509KeyPair(cert, key)
-	if err != nil {
-		return nil, err
-	}
-
-	return &tls.Config{
-		Certificates: []tls.Certificate{certificate},
-	}, nil
 }

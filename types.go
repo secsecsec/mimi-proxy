@@ -1,37 +1,55 @@
 package main
 
 import (
-	"crypto/tls"
-	vhost "github.com/inconshreveable/go-vhost"
+	"sync"
 )
 
-var config = struct {
-	SecureBindAddr   string               `json:"secure_bind_addr"`
-	InsecureBindAddr string               `json:"insecure_bind_addr"`
-	Frontends        map[string]*Frontend `json:"frontends"`
-	EtcdKey          string               `json:"etcd_key"`
-	EtcdServers      []string             `json:"etcd_servers"`
-	ErrorPage        string               `json:"error_page"`
-}{}
+func NewApplication(Id string, Frontends []*Frontend, Backends []*Backend) *Application {
+	app := &Application{
+		Id:        Id,
+		Frontends: Frontends,
+		Backends:  Backends,
+		ch:        make(chan bool),
+		waitGroup: &sync.WaitGroup{},
+	}
+	return app
+}
+
+type Application struct {
+	Id        string      `json:"id"`
+	Frontends []*Frontend `json:"frontends"`
+	Backends  []*Backend  `json:"backends"`
+	ch        chan bool
+	waitGroup *sync.WaitGroup
+}
+
+func (self *Application) Create() (err error) {
+	_, err = etcdClient.CreateDir("/"+config.EtcdKey+"/"+self.Id, 1)
+	return err
+}
+
+func (self *Application) Start() (err error) {
+	// self.waitGroup.Add(1)
+
+	// defer s.waitGroup.Done()
+
+	// TODO run application: frontends / backends
+	// defer wg.Done()
+
+	return nil
+}
+
+func (self *Application) Delete() (err error) {
+	_, err = etcdClient.DeleteDir("/" + config.EtcdKey + "/" + self.Id)
+	return err
+}
+
+func (self *Application) Stop() {
+	// close(s.ch)
+	// s.waitGroup.Wait()
+}
 
 type Backend struct {
 	Url            string `"json:url"`
 	ConnectTimeout int    `json:connect_timeout"`
-}
-
-type Frontend struct {
-	Hosts    []string `json:"hosts"`
-	Strategy string   `json:"strategy"`
-	TLSCrt   string   `json:"tls_crt"`
-	TLSKey   string   `json:"tls_key"`
-
-	muxTLS    *vhost.TLSMuxer
-	muxHTTP   *vhost.HTTPMuxer
-	strategy  BackendStrategy
-	tlsConfig *tls.Config
-	backends  []Backend
-}
-
-func (f *Frontend) isSecure() bool {
-	return f.tlsConfig != nil
 }
