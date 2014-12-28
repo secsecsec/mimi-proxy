@@ -28,7 +28,6 @@ type Frontend struct {
 
 	strategy  BackendStrategy
 	tlsConfig *tls.Config
-	backends  []Backend
 	server    *Server
 	running   bool
 
@@ -64,7 +63,6 @@ func (f *Frontend) SetBackends(backends []Backend) {
 	f.strategy = &RoundRobinStrategy{
 		backends: backends,
 	}
-	f.backends = backends
 }
 
 func (f *Frontend) isSecure() bool {
@@ -125,7 +123,7 @@ func (s *Frontend) RunHost(host string, l net.Listener) {
 
 		if s.running == false {
 			conn.Close()
-			continue
+			break
 		}
 
 		select {
@@ -214,6 +212,11 @@ func (s *Frontend) joinConnections(c1 net.Conn, c2 net.Conn) {
 	go halfJoin(c1, c2)
 	go halfJoin(c2, c1)
 	wg.Wait()
+}
+
+func (s *Frontend) Delete() {
+	s.Stop()
+
 }
 
 func (s *Frontend) Stop() {

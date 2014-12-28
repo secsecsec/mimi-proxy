@@ -1,12 +1,20 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/coreos/go-etcd/etcd"
 	"github.com/mimicloud/easyconfig"
 	"io/ioutil"
 	"log"
 	"os"
+	"time"
+)
+
+const (
+	usage = `mimiproxy [--path] file
+
+ `
 )
 
 var config = struct {
@@ -21,15 +29,22 @@ var config = struct {
 
 var etcdClient *etcd.Client
 var collection *Collection
+var configPath string
 
 func init() {
-	easyconfig.Parse("./example.json", &config)
-	etcdClient = etcd.NewClient(config.EtcdServers)
-	collection = &Collection{
-		Applications: make(map[string]*Application),
-		Backends:     make(map[string]Backend),
-		Frontends:    make(map[string]*Frontend),
+	flag.StringVar(&configPath, "path", "", "Path to config file")
+
+	flag.Parse()
+	if flag.NFlag() == 0 {
+		os.Stderr.WriteString(usage)
+		flag.PrintDefaults()
+		os.Exit(0)
 	}
+
+	easyconfig.Parse(configPath, &config)
+
+	etcdClient = etcd.NewClient(config.EtcdServers)
+	collection = NewCollection()
 }
 
 func main() {
@@ -42,9 +57,6 @@ func main() {
 		}
 	}
 
-	// watchApps(etcdClient, config.EtcdKey)
-	// os.Exit(0)
-
 	frontends := ResolveApps(etcdClient, config.EtcdKey)
 	secureFrontends, insecureFrontends := initializeApplications(frontends)
 
@@ -53,12 +65,12 @@ func main() {
 		Secure:    true,
 		ErrorPage: string(errorPage),
 		Frontends: secureFrontends,
-		Logger:    log.New(os.Stdout, "secure ", log.LstdFlags|log.Lshortfile),
+		Logger:    log.New(os.Stdout, config.SecureBindAddr+" ", log.LstdFlags|log.Lshortfile),
 	}
 
 	// Start secure (:443 port) server
 	go func() {
-		err = secureServer.Run()
+		err = secureServer.ListenAndServe()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
 			os.Exit(1)
@@ -70,23 +82,25 @@ func main() {
 		Secure:    false,
 		ErrorPage: string(errorPage),
 		Frontends: insecureFrontends,
-		Logger:    log.New(os.Stdout, "insecure ", log.LstdFlags|log.Lshortfile),
+		Logger:    log.New(os.Stdout, config.InsecureBindAddr+" ", log.LstdFlags|log.Lshortfile),
 	}
 
 	// Start insecure (:80 port) server
 	go func() {
-		err = insecureServer.Run()
+		err = insecureServer.ListenAndServe()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
 			os.Exit(1)
 		}
 	}()
 
-	// Watch new applications / frontends / backends in etcd server
-	go watchApps(etcdClient, config.EtcdKey)
+	go func() {
+		time.Sleep(3 * time.Second)
+		collection.Frontends["id1"].Stop()
+	}()
 
 	apiServer := &ApiServer{
 		EnableCheckAlive: true,
 	}
-	apiServer.Run(config.ApiServerAddr)
+	apiServer.ListenAndServe(config.ApiServerAddr)
 }

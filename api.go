@@ -27,7 +27,7 @@ func (self *ApiServer) CheckAlive() {
 	}
 }
 
-func (self *ApiServer) Run(listen string) {
+func (self *ApiServer) ListenAndServe(listen string) {
 	gin.SetMode(gin.ReleaseMode)
 
 	if self.EnableCheckAlive {

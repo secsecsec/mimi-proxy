@@ -28,7 +28,7 @@ type Server struct {
 	ready chan int
 }
 
-func (s *Server) Run() error {
+func (s *Server) ListenAndServe() error {
 	// bind a port to handle HTTP / TLS connections
 	l, err := net.Listen("tcp", s.Listen)
 	if err != nil {
