@@ -4,6 +4,12 @@ import (
 	"sync"
 )
 
+type Collection struct {
+	Applications map[string]*Application
+	Backends     map[string]Backend
+	Frontends    map[string]*Frontend
+}
+
 func NewApplication(Id string, Frontends []*Frontend, Backends []*Backend) *Application {
 	app := &Application{
 		Id:        Id,

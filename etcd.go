@@ -1,15 +1,21 @@
 package main
 
 import (
-	b64 "encoding/base64"
 	"encoding/json"
 	"github.com/coreos/go-etcd/etcd"
 	"log"
+	"strings"
 )
 
 const (
 	defaultConnectTimeout = 10000 // milliseconds
 )
+
+type FrontendTmp struct {
+	Hosts  []string `json:"hosts"`
+	TLSCrt string   `json:"tls_crt"`
+	TLSKey string   `json:"tls_key"`
+}
 
 func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 	var backends = make(map[string][]Backend)
@@ -21,8 +27,8 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 	}
 
 	for _, n := range r.Node.Nodes {
-		appId := n.Key[len(etcdKey)+2:]
-		log.Printf("%s %s %s", n.Key, n.Value, appId)
+		appId := n.Key[strings.LastIndex(n.Key, "/")+1:]
+		log.Printf("%s", appId)
 
 		backendsEtcd, err := client.Get("/"+etcdKey+"/"+appId+"/backends", true, false)
 		if err != nil {
@@ -30,7 +36,9 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 		}
 
 		for _, t := range backendsEtcd.Node.Nodes {
-			log.Printf("%s %s", t.Key, t.Value)
+			backendId := t.Key[strings.LastIndex(t.Key, "/")+1:]
+			log.Printf("%s", backendId)
+
 			if _, ok := backends[appId]; !ok {
 				backends[appId] = []Backend{}
 			}
@@ -40,7 +48,6 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 				log.Printf("Skip backend %s", err)
 				continue
 			}
-			log.Printf("%s", backend.Url)
 			if backend.Url == "" {
 				log.Printf("Skip backend with incorrect url %s", backend)
 				continue
@@ -49,6 +56,7 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 				backend.ConnectTimeout = 100
 			}
 			backends[appId] = append(backends[appId], backend)
+			collection.Backends[backendId] = backend
 		}
 
 		frontendsEtcd, err := client.Get("/"+etcdKey+"/"+appId+"/frontends", true, false)
@@ -57,42 +65,32 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 		}
 
 		for _, t := range frontendsEtcd.Node.Nodes {
-			log.Printf("%s %s", t.Key, t.Value)
+			frontendId := t.Key[strings.LastIndex(t.Key, "/")+1:]
+			log.Printf("%s", frontendId)
+
 			if _, ok := frontends[appId]; !ok {
 				frontends[appId] = []*Frontend{}
 			}
 
-			frontend := new(Frontend)
-			if err := json.Unmarshal([]byte(t.Value), &frontend); err != nil {
+			var tmp FrontendTmp
+			frontend := NewFrontend(frontendId)
+			if err := json.Unmarshal([]byte(t.Value), &tmp); err != nil {
 				log.Printf("Skip frontend %s", err)
 				continue
 			}
+			frontend.Hosts = tmp.Hosts
+			frontend.SetBackends(backends[appId])
 
-			// always round-robin strategy for now
-			frontend.strategy = &RoundRobinStrategy{
-				backends: backends[appId],
+			if tmp.TLSCrt != "" || tmp.TLSKey != "" {
+				err = frontend.SetTLS(tmp.TLSCrt, tmp.TLSCrt)
+				if err != nil {
+					log.Printf("Failed to decode certificate / key: %v", err)
+					continue
+				}
 			}
-			frontend.backends = backends[appId]
-			if frontend.TLSCrt != "" || frontend.TLSKey != "" {
-				cert, err := b64.StdEncoding.DecodeString(frontend.TLSCrt)
-				if err != nil {
-					log.Printf("Failed to decode certificate '%v': %v", frontend.Hosts, err)
-					continue
-				}
-				key, err := b64.StdEncoding.DecodeString(frontend.TLSKey)
-				if err != nil {
-					log.Printf("Failed to decode key '%v': %v", frontend.Hosts, err)
-					continue
-				}
-				log.Printf("%s %s", cert, key)
-				cfg, err := loadTLSConfig(cert, key)
-				if err != nil {
-					log.Printf("Failed to load TLS configuration for frontend '%v': %v", frontend.Hosts, err)
-					continue
-				}
-				frontend.tlsConfig = cfg
-			}
+
 			frontends[appId] = append(frontends[appId], frontend)
+			collection.Frontends[frontendId] = frontend
 		}
 	}
 

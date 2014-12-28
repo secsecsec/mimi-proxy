@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"time"
 )
 
 var config = struct {
@@ -20,10 +21,16 @@ var config = struct {
 }{}
 
 var etcdClient *etcd.Client
+var collection *Collection
 
 func init() {
 	easyconfig.Parse("./example.json", &config)
 	etcdClient = etcd.NewClient(config.EtcdServers)
+	collection = &Collection{
+		Applications: make(map[string]*Application),
+		Backends:     make(map[string]Backend),
+		Frontends:    make(map[string]*Frontend),
+	}
 }
 
 func main() {
@@ -76,6 +83,18 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
 			os.Exit(1)
 		}
+	}()
+
+	go func() {
+		time.Sleep(time.Second * 3)
+		log.Printf("Stop")
+		collection.Frontends["id1"].Stop()
+	}()
+
+	go func() {
+		time.Sleep(time.Second * 6)
+		log.Printf("Start")
+		collection.Frontends["id1"].Start()
 	}()
 
 	apiServer := &ApiServer{

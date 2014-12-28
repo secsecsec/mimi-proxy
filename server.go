@@ -14,20 +14,22 @@ const (
 
 type Server struct {
 	*log.Logger
-	wait      sync.WaitGroup
+
 	Listen    string
 	Secure    bool
 	ErrorPage string
+	Frontends []*Frontend
+
+	muxTLS  *vhost.TLSMuxer
+	muxHTTP *vhost.HTTPMuxer
+	wait    sync.WaitGroup
 
 	// these are for easier testing
-	Frontends []*Frontend
-	muxTLS    *vhost.TLSMuxer
-	muxHTTP   *vhost.HTTPMuxer
-	ready     chan int
+	ready chan int
 }
 
 func (s *Server) Run() error {
-	// bind a port to handle TLS connections
+	// bind a port to handle HTTP / TLS connections
 	l, err := net.Listen("tcp", s.Listen)
 	if err != nil {
 		return err
@@ -55,7 +57,7 @@ func (s *Server) Run() error {
 	// setup muxing for each frontend
 	for _, frontend := range s.Frontends {
 		frontend.server = s
-		frontend.Start()
+		frontend.Create(true)
 	}
 
 	// custom error handler so we can log errors
