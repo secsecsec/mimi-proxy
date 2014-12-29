@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	b64 "encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -69,15 +70,16 @@ func (f *Frontend) isSecure() bool {
 	return f.tlsConfig != nil
 }
 
-func (s *Frontend) Start() {
+func (s *Frontend) Start() error {
+	if s.running {
+		s.server.Printf("Frontend already started")
+		return errors.New("Frontend already started")
+	}
+
+	s.server.Printf("Start frontend %s", s.Id)
 	s.running = true
 	s.ch = make(chan bool)
-}
 
-func (s *Frontend) Create(start bool) error {
-	if start {
-		s.Start()
-	}
 	s.wait.Add(len(s.Hosts))
 
 	for _, host := range s.Hosts {
@@ -114,43 +116,47 @@ func (s *Frontend) RunHost(host string, l net.Listener) {
 
 	s.server.Printf("Handling connections to %v", host)
 	for {
-		var err error
-		var conn net.Conn
-
-		s.server.Printf("Request on frontend %s. Is running %v", s.Id, s.running)
-		// accept next connection to this frontend
-		conn, err = l.Accept()
-
-		if s.running == false {
-			conn.Close()
-			break
-		}
-
 		select {
 		case <-s.ch:
 			s.server.Printf("Stopping frontend %s: %s", s.Id, s.Hosts)
-			conn.Close()
 			for i := 0; i < len(s.Hosts); i++ {
 				s.wait.Done()
 			}
-			return
-		default:
-		}
-
-		if err != nil {
-			s.server.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
-			if e, ok := err.(net.Error); ok {
-				if e.Temporary() {
-					continue
+			for _, lh := range s.hostListeners {
+				err := lh.Close()
+				if lhErr, ok := err.(*net.OpError); ok {
+					s.server.Printf("%s", lhErr)
 				}
 			}
-			continue
-		}
-		s.server.Printf("Accepted new connection for %v from %v", host, conn.RemoteAddr())
+			return
+		default:
+			var err error
+			var conn net.Conn
 
-		s.wait.Add(1)
-		// proxy the connection to an backend
-		go s.proxyConnection(host, conn)
+			s.server.Printf("Request on frontend %s. Is running %v", s.Id, s.running)
+			// accept next connection to this frontend
+			conn, err = l.Accept()
+
+			if s.running == false {
+				conn.Close()
+				break
+			}
+
+			if err != nil {
+				s.server.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
+				if e, ok := err.(net.Error); ok {
+					if e.Temporary() {
+						continue
+					}
+				}
+				continue
+			}
+			s.server.Printf("Accepted new connection for %v from %v", host, conn.RemoteAddr())
+
+			s.wait.Add(1)
+			// proxy the connection to an backend
+			go s.proxyConnection(host, conn)
+		}
 	}
 }
 
@@ -214,20 +220,14 @@ func (s *Frontend) joinConnections(c1 net.Conn, c2 net.Conn) {
 	wg.Wait()
 }
 
-func (s *Frontend) Delete() {
-	s.Stop()
-
-}
-
 func (s *Frontend) Stop() {
+	if s.running == false {
+		s.server.Printf("Frontend already stopped")
+		return
+	}
+
 	s.running = false
-
 	s.server.Printf("Stop frontend %s", s.Id)
-
 	close(s.ch)
 	s.wait.Wait()
-
-	for _, l := range s.hostListeners {
-		l.Close()
-	}
 }

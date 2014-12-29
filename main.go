@@ -8,13 +8,12 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	// "time"
 )
 
 const (
 	usage = `mimiproxy [--path] file
 
- `
+`
 )
 
 var config = struct {
@@ -93,11 +92,6 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-
-	// go func() {
-	// 	time.Sleep(3 * time.Second)
-	// 	collection.Frontends["id1"].Stop()
-	// }()
 
 	apiServer := &ApiServer{
 		EnableCheckAlive: true,

@@ -57,7 +57,7 @@ func (s *Server) ListenAndServe() error {
 	// setup muxing for each frontend
 	for _, frontend := range s.Frontends {
 		frontend.server = s
-		go frontend.Create(true)
+		go frontend.Start()
 	}
 
 	// custom error handler so we can log errors
