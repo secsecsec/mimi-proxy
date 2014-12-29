@@ -145,6 +145,14 @@ func InitApplications(frontends map[string]*Frontend) (map[string]*Frontend, map
 	return secureFrontends, insecureFrontends
 }
 
+func isBackend(r etcd.Response) bool {
+	return strings.Contains(r.Node.Key, "backends")
+}
+
+func isFrontend(r etcd.Response) bool {
+	return strings.Contains(r.Node.Key, "frontends")
+}
+
 func watchApps(client *etcd.Client, etcdKey string, secureServer, insecureServer *Server) {
 	for {
 		r, err := client.Watch("/"+etcdKey, 0, true, nil, nil)
@@ -158,18 +166,18 @@ func watchApps(client *etcd.Client, etcdKey string, secureServer, insecureServer
 		tmpId := r.Node.Key[strings.LastIndex(r.Node.Key, "/")+1:]
 
 		if r.Action == "delete" {
-			if strings.Contains(r.Node.Key, "backends") {
+			if isBackend(r) {
 				collection.Applications[appId].DeleteBackend(tmpId)
 				delete(collection.Backends, tmpId)
-			} else if strings.Contains(r.Node.Key, "frontends") {
+			} else if isFrontend(r) {
 				collection.Applications[appId].DeleteFrontend(tmpId)
 				delete(collection.Frontends, tmpId)
 			} else {
 				collection.Applications[appId].Stop()
 				delete(collection.Applications, appId)
 			}
-		} else if r.Action == "set" {
-			if strings.Contains(r.Node.Key, "backends") {
+		} else if r.Action == "set" || r.Action == "update" {
+			if isBackend(r) {
 				// Create / Update / Delete backend
 				backend, err := NewBackendFromJson(tmpId, r.Node.Value)
 				if err != nil {
@@ -181,7 +189,7 @@ func watchApps(client *etcd.Client, etcdKey string, secureServer, insecureServer
 				}
 				collection.Backends[tmpId] = backend
 				collection.Applications[appId].AddBackend(backend)
-			} else if strings.Contains(r.Node.Key, "frontends") {
+			} else if isFrontend(r) {
 				// Create / Update / Delete frontend
 				frontend, err := newFrontendFromJson(tmpId, r.Node.Value)
 				if err != nil {
