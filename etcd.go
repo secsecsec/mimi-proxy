@@ -17,13 +17,14 @@ type FrontendTmp struct {
 	TLSKey string   `json:"tls_key"`
 }
 
-func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
+func ResolveApps(client *etcd.Client, etcdKey string) (map[string]*Frontend, map[string]*Frontend) {
 	var backends = make(map[string][]Backend)
-	var frontends = make(map[string][]*Frontend)
+	var frontendsApp = make(map[string]map[string]*Frontend)
+	var frontends = make(map[string]*Frontend)
 
 	r, err := client.Get("/"+etcdKey, false, false)
 	if err != nil {
-		return nil
+		panic(err)
 	}
 
 	for _, n := range r.Node.Nodes {
@@ -66,8 +67,8 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 		for _, t := range frontendsEtcd.Node.Nodes {
 			frontendId := t.Key[strings.LastIndex(t.Key, "/")+1:]
 
-			if _, ok := frontends[appId]; !ok {
-				frontends[appId] = []*Frontend{}
+			if _, ok := frontendsApp[appId]; !ok {
+				frontendsApp[appId] = make(map[string]*Frontend)
 			}
 
 			frontend, err := newFrontendFromJson(frontendId, t.Value)
@@ -76,7 +77,8 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 				continue
 			}
 			frontend.SetBackends(backends[appId])
-			frontends[appId] = append(frontends[appId], frontend)
+			frontendsApp[appId][frontend.Id] = frontend
+			frontends[frontend.Id] = frontend
 			collection.Frontends[frontendId] = frontend
 		}
 
@@ -86,10 +88,7 @@ func ResolveApps(client *etcd.Client, etcdKey string) map[string][]*Frontend {
 		collection.Applications[appId] = app
 	}
 
-	// Watch new applications / frontends / backends in etcd server
-	go watchApps(etcdClient, etcdKey)
-
-	return frontends
+	return InitApplications(frontends)
 }
 
 func newFrontendFromJson(id, data string) (*Frontend, error) {
@@ -112,20 +111,21 @@ func newFrontendFromJson(id, data string) (*Frontend, error) {
 	return frontend, nil
 }
 
-func initializeApplications(frontendsRaw map[string][]*Frontend) (secureFrontends []*Frontend, insecureFrontends []*Frontend) {
-	for _, frontends := range frontendsRaw {
-		for _, front := range frontends {
-			insecureFrontends = append(insecureFrontends, front)
-			if front.isSecure() {
-				secureFrontends = append(secureFrontends, front)
-			}
+func InitApplications(frontends map[string]*Frontend) (map[string]*Frontend, map[string]*Frontend) {
+	secureFrontends := make(map[string]*Frontend)
+	insecureFrontends := make(map[string]*Frontend)
+
+	for id, f := range frontends {
+		insecureFrontends[id] = f
+		if f.isSecure() {
+			secureFrontends[id] = f
 		}
 	}
 
 	return secureFrontends, insecureFrontends
 }
 
-func watchApps(client *etcd.Client, etcdKey string) {
+func watchApps(client *etcd.Client, etcdKey string, secureServer, insecureServer *Server) {
 	for {
 		r, err := client.Watch("/"+etcdKey, 0, true, nil, nil)
 		if err != nil {
@@ -134,7 +134,7 @@ func watchApps(client *etcd.Client, etcdKey string) {
 		}
 
 		parts := strings.Split(r.Node.Key, "/")
-		appId := parts[1]
+		appId := parts[2]
 		tmpId := r.Node.Key[strings.LastIndex(r.Node.Key, "/")+1:]
 		if strings.Contains(r.Node.Key, "backends") {
 			// Create / Update / Delete backend
@@ -145,12 +145,22 @@ func watchApps(client *etcd.Client, etcdKey string) {
 				log.Printf("Skip frontend %s:%s", appId, tmpId)
 				continue
 			}
+
 			var backendList []Backend
-			// for _, back := range collection.Applications[appId].Backends {
-			// 	backendList = append(backendList, back)
-			// }
+			for _, back := range collection.Applications[appId].Backends {
+				backendList = append(backendList, back)
+			}
 			frontend.SetBackends(backendList)
+
 			collection.Frontends[tmpId] = frontend
+
+			if frontend.isSecure() {
+				secureServer.AddFrontend(frontend)
+				go secureServer.RunFrontend(frontend)
+			} else {
+				insecureServer.AddFrontend(frontend)
+				go insecureServer.RunFrontend(frontend)
+			}
 		} else {
 			// Create / Update / Delete application
 		}

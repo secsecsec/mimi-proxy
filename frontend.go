@@ -76,11 +76,31 @@ func (s *Frontend) Start() error {
 		return errors.New("Frontend already started")
 	}
 
-	s.server.Printf("Start frontend %s", s.Id)
+	s.server.Printf("Add new frontend %s: %s", s.Id, s.Hosts)
 	s.running = true
 	s.ch = make(chan bool)
 
 	s.wait.Add(len(s.Hosts))
+
+	go func() {
+		for {
+			select {
+			case <-s.ch:
+				s.server.Printf("Stopping frontend %s: %s", s.Id, s.Hosts)
+				for i := 0; i < len(s.Hosts); i++ {
+					s.wait.Done()
+				}
+				for _, lh := range s.hostListeners {
+					err := lh.Close()
+					if lhErr, ok := err.(*net.OpError); ok {
+						s.server.Printf("%s", lhErr)
+					}
+				}
+				return
+			default:
+			}
+		}
+	}()
 
 	for _, host := range s.Hosts {
 		fl, err := s.prepareHost(host)
@@ -116,53 +136,41 @@ func (s *Frontend) RunHost(host string, l net.Listener) {
 
 	s.server.Printf("Handling connections to %v", host)
 	for {
-		select {
-		case <-s.ch:
-			s.server.Printf("Stopping frontend %s: %s", s.Id, s.Hosts)
-			for i := 0; i < len(s.Hosts); i++ {
-				s.wait.Done()
-			}
-			for _, lh := range s.hostListeners {
-				err := lh.Close()
-				if lhErr, ok := err.(*net.OpError); ok {
-					s.server.Printf("%s", lhErr)
-				}
-			}
-			return
-		default:
-			var err error
-			var conn net.Conn
-
-			s.server.Printf("Request on frontend %s. Is running %v", s.Id, s.running)
-			// accept next connection to this frontend
-			conn, err = l.Accept()
-
-			if s.running == false {
-				conn.Close()
-				break
-			}
-
-			if err != nil {
-				s.server.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
-				if e, ok := err.(net.Error); ok {
-					if e.Temporary() {
-						continue
-					}
-				}
-				continue
-			}
-			s.server.Printf("Accepted new connection for %v from %v", host, conn.RemoteAddr())
-
-			s.wait.Add(1)
-			// proxy the connection to an backend
-			go s.proxyConnection(host, conn)
+		if s.running == false {
+			break
 		}
+
+		var err error
+		var conn net.Conn
+
+		if s.running == false {
+			conn.Close()
+			break
+		}
+
+		s.server.Printf("Request on frontend %s. Is running %v", s.Id, s.running)
+		// Accept next connection to this frontend
+		conn, err = l.Accept()
+
+		if err != nil {
+			if conn != nil {
+				s.server.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
+			}
+			if e, ok := err.(net.Error); ok {
+				if e.Temporary() {
+					continue
+				}
+			}
+			continue
+		}
+		s.server.Printf("Accepted new connection for %v from %v", host, conn.RemoteAddr())
+
+		// Proxy the connection to an backend
+		go s.proxyConnection(host, conn)
 	}
 }
 
 func (s *Frontend) proxyConnection(host string, c net.Conn) (err error) {
-	defer s.wait.Done()
-
 	// unwrap if tls cert/key was specified
 	if s.isSecure() { //
 		if s.server.Secure {

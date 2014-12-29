@@ -6,7 +6,6 @@ import (
 	"github.com/coreos/go-etcd/etcd"
 	"github.com/mimicloud/easyconfig"
 	"io/ioutil"
-	"log"
 	"os"
 )
 
@@ -56,16 +55,10 @@ func main() {
 		}
 	}
 
-	frontends := ResolveApps(etcdClient, config.EtcdKey)
-	secureFrontends, insecureFrontends := initializeApplications(frontends)
+	secureFrontends, insecureFrontends := ResolveApps(etcdClient, config.EtcdKey)
 
-	secureServer := &Server{
-		Listen:    config.SecureBindAddr,
-		Secure:    true,
-		ErrorPage: string(errorPage),
-		Frontends: secureFrontends,
-		Logger:    log.New(os.Stdout, config.SecureBindAddr+" ", log.LstdFlags|log.Lshortfile),
-	}
+	secureServer := NewServer(config.SecureBindAddr, true, string(errorPage))
+	secureServer.Frontends = secureFrontends
 
 	// Start secure (:443 port) server
 	go func() {
@@ -76,13 +69,8 @@ func main() {
 		}
 	}()
 
-	insecureServer := &Server{
-		Listen:    config.InsecureBindAddr,
-		Secure:    false,
-		ErrorPage: string(errorPage),
-		Frontends: insecureFrontends,
-		Logger:    log.New(os.Stdout, config.InsecureBindAddr+" ", log.LstdFlags|log.Lshortfile),
-	}
+	insecureServer := NewServer(config.InsecureBindAddr, false, string(errorPage))
+	insecureServer.Frontends = insecureFrontends
 
 	// Start insecure (:80 port) server
 	go func() {
@@ -92,6 +80,9 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// Watch new applications / frontends / backends in etcd server
+	go watchApps(etcdClient, config.EtcdKey, secureServer, insecureServer)
 
 	apiServer := &ApiServer{
 		EnableCheckAlive: true,

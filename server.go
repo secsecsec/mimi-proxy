@@ -4,6 +4,7 @@ import (
 	vhost "github.com/inconshreveable/go-vhost"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -12,13 +13,23 @@ const (
 	muxTimeout = 10 * time.Second
 )
 
+func NewServer(listen string, secure bool, errorPage string) *Server {
+	return &Server{
+		Listen:    listen,
+		Secure:    secure,
+		ErrorPage: errorPage,
+		Frontends: make(map[string]*Frontend),
+		Logger:    log.New(os.Stdout, config.SecureBindAddr+" ", log.LstdFlags|log.Lshortfile),
+	}
+}
+
 type Server struct {
 	*log.Logger
 
 	Listen    string
 	Secure    bool
 	ErrorPage string
-	Frontends []*Frontend
+	Frontends map[string]*Frontend
 
 	muxTLS  *vhost.TLSMuxer
 	muxHTTP *vhost.HTTPMuxer
@@ -56,8 +67,7 @@ func (s *Server) ListenAndServe() error {
 
 	// setup muxing for each frontend
 	for _, frontend := range s.Frontends {
-		frontend.server = s
-		go frontend.Start()
+		go s.RunFrontend(frontend)
 	}
 
 	// custom error handler so we can log errors
@@ -73,6 +83,20 @@ func (s *Server) ListenAndServe() error {
 	return nil
 }
 
+func (s *Server) AddFrontend(frontend *Frontend) {
+	if f, ok := s.Frontends[frontend.Id]; ok {
+		f.Stop()
+	}
+
+	s.Frontends[frontend.Id] = frontend
+}
+
+func (s *Server) RunFrontend(frontend *Frontend) {
+	s.wait.Add(1)
+	frontend.server = s
+	frontend.Start()
+}
+
 func (s *Server) ErrorHandler() {
 	s.Printf("Start error handler")
 	for {
@@ -85,20 +109,14 @@ func (s *Server) ErrorHandler() {
 			conn, err = s.muxHTTP.NextError()
 		}
 
-		switch err.(type) {
-		case vhost.BadRequest:
-			s.Printf("got a bad request!")
-		case vhost.NotFound:
-			s.Printf("got a connection for an unknown vhost")
-		case vhost.Closed:
-			s.Printf("Closed conn: %s", err)
-		default:
-			if conn != nil {
-				s.Printf("Unknown server error")
+		if conn == nil {
+			s.Printf("Failed to mux next connection, error: %v", err)
+			if _, ok := err.(vhost.Closed); ok {
+				return
+			} else {
+				continue
 			}
-		}
-
-		if conn != nil {
+		} else {
 			s.Printf("Failed to mux connection from %v, error: %v", conn.RemoteAddr(), err)
 			// XXX: respond with valid TLS close messages
 			conn.Close()
