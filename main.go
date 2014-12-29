@@ -7,6 +7,7 @@ import (
 	"github.com/mimicloud/easyconfig"
 	"io/ioutil"
 	"os"
+	"time"
 )
 
 const (
@@ -79,6 +80,16 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to start slt: %v\n", err)
 			os.Exit(1)
 		}
+	}()
+
+	go func() {
+		time.Sleep(3 * time.Second)
+		// collection.Applications["u1"].DeleteBackend("b1")
+
+		// time.Sleep(3 * time.Second)
+		// backend := NewBackend("b2")
+		// backend.Url = "localhost:3000"
+		// collection.Applications["u1"].AddBackend(backend)
 	}()
 
 	// Watch new applications / frontends / backends in etcd server

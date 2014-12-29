@@ -16,6 +16,8 @@ func NewFrontend(id string) *Frontend {
 		Id:   id,
 		ch:   make(chan bool),
 		wait: &sync.WaitGroup{},
+		// always round-robin strategy for now
+		strategy: &RoundRobinStrategy{},
 	}
 
 	return fr
@@ -59,11 +61,18 @@ func (s *Frontend) SetTLS(TLSCrt, TLSKey string) (err error) {
 	return nil
 }
 
+func (f *Frontend) AddBackend(backend Backend) {
+	f.server.Printf("Add new backend: %s", backend.Id)
+	f.strategy.AddBackend(backend)
+}
+
+func (f *Frontend) DeleteBackend(id string) {
+	f.server.Printf("delete backend: %s", id)
+	f.strategy.DeleteBackend(id)
+}
+
 func (f *Frontend) SetBackends(backends []Backend) {
-	// always round-robin strategy for now
-	f.strategy = &RoundRobinStrategy{
-		backends: backends,
-	}
+	f.strategy.SetBackends(backends)
 }
 
 func (f *Frontend) isSecure() bool {
@@ -186,7 +195,11 @@ Location: https://%s
 	}
 
 	// pick the backend
-	backend := s.strategy.NextBackend()
+	backend, err := s.strategy.NextBackend()
+	if err != nil {
+		s.server.Printf("Error: %s", err)
+		return nil
+	}
 
 	// dial the backend
 	upConn, err := net.DialTimeout("tcp", backend.Url, time.Duration(backend.ConnectTimeout)*time.Millisecond)

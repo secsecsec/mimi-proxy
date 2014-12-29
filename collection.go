@@ -13,3 +13,7 @@ func NewCollection() *Collection {
 		Frontends:    make(map[string]*Frontend),
 	}
 }
+
+func (c *Collection) AddApplication(app *Application) {
+	c.Applications[app.Id] = app
+}

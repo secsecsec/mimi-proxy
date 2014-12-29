@@ -1,5 +1,10 @@
 package main
 
+import (
+	"errors"
+	"fmt"
+)
+
 func NewApplication(Id string) *Application {
 	return &Application{
 		Id:        Id,
@@ -34,4 +39,33 @@ func (s *Application) Start() {
 	for _, frontend := range s.Frontends {
 		frontend.Start()
 	}
+}
+
+func (s *Application) AddBackend(backend Backend) {
+	for _, frontend := range s.Frontends {
+		frontend.AddBackend(backend)
+	}
+}
+
+func (s *Application) DeleteBackend(id string) error {
+	if _, ok := s.Backends[id]; ok {
+		delete(s.Backends, id)
+		return nil
+	}
+
+	for _, frontend := range s.Frontends {
+		frontend.DeleteBackend(id)
+	}
+
+	return errors.New(fmt.Sprintf("Unknown backend id: %s", id))
+}
+
+func (s *Application) DeleteFrontend(id string) error {
+	if frontend, ok := s.Frontends[id]; ok {
+		frontend.Stop()
+		delete(s.Frontends, id)
+		return nil
+	}
+
+	return errors.New(fmt.Sprintf("Unknown backend id: %s", id))
 }

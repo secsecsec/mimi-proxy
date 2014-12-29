@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/coreos/go-etcd/etcd"
 	"log"
 	"strings"
@@ -15,6 +17,11 @@ type FrontendTmp struct {
 	Hosts  []string `json:"hosts"`
 	TLSCrt string   `json:"tls_crt"`
 	TLSKey string   `json:"tls_key"`
+}
+
+type BackendTmp struct {
+	Url            string `"json:url"`
+	ConnectTimeout int    `json:connect_timeout"`
 }
 
 func ResolveApps(client *etcd.Client, etcdKey string) (map[string]*Frontend, map[string]*Frontend) {
@@ -42,17 +49,10 @@ func ResolveApps(client *etcd.Client, etcdKey string) (map[string]*Frontend, map
 				backends[appId] = []Backend{}
 			}
 
-			var backend Backend
-			if err := json.Unmarshal([]byte(t.Value), &backend); err != nil {
-				log.Printf("Skip backend %s", err)
+			backend, err := NewBackendFromJson(backendId, t.Value)
+			if err != nil {
+				log.Printf("Skip backend due error: %s", err)
 				continue
-			}
-			if backend.Url == "" {
-				log.Printf("Skip backend with incorrect url %s", backend)
-				continue
-			}
-			if backend.ConnectTimeout == 0 {
-				backend.ConnectTimeout = defaultConnectTimeout
 			}
 
 			backends[appId] = append(backends[appId], backend)
@@ -89,6 +89,26 @@ func ResolveApps(client *etcd.Client, etcdKey string) (map[string]*Frontend, map
 	}
 
 	return InitApplications(frontends)
+}
+
+func NewBackendFromJson(id, data string) (Backend, error) {
+	var tmp BackendTmp
+
+	backend := NewBackend(id)
+	if err := json.Unmarshal([]byte(data), &tmp); err != nil {
+		return backend, err
+	}
+
+	if tmp.Url == "" {
+		return backend, errors.New(fmt.Sprintf("Skip backend with incorrect url %s", id))
+	}
+	backend.Url = tmp.Url
+
+	if tmp.ConnectTimeout != 0 {
+		backend.ConnectTimeout = tmp.ConnectTimeout
+	}
+
+	return backend, nil
 }
 
 func newFrontendFromJson(id, data string) (*Frontend, error) {
@@ -136,33 +156,60 @@ func watchApps(client *etcd.Client, etcdKey string, secureServer, insecureServer
 		parts := strings.Split(r.Node.Key, "/")
 		appId := parts[2]
 		tmpId := r.Node.Key[strings.LastIndex(r.Node.Key, "/")+1:]
-		if strings.Contains(r.Node.Key, "backends") {
-			// Create / Update / Delete backend
-		} else if strings.Contains(r.Node.Key, "frontends") {
-			// Create / Update / Delete frontend
-			frontend, err := newFrontendFromJson(tmpId, r.Node.Value)
-			if err != nil {
-				log.Printf("Skip frontend %s:%s", appId, tmpId)
-				continue
-			}
 
-			var backendList []Backend
-			for _, back := range collection.Applications[appId].Backends {
-				backendList = append(backendList, back)
-			}
-			frontend.SetBackends(backendList)
-
-			collection.Frontends[tmpId] = frontend
-
-			if frontend.isSecure() {
-				secureServer.AddFrontend(frontend)
-				go secureServer.RunFrontend(frontend)
+		if r.Action == "delete" {
+			if strings.Contains(r.Node.Key, "backends") {
+				collection.Applications[appId].DeleteBackend(tmpId)
+				delete(collection.Backends, tmpId)
+			} else if strings.Contains(r.Node.Key, "frontends") {
+				collection.Applications[appId].DeleteFrontend(tmpId)
+				delete(collection.Frontends, tmpId)
 			} else {
-				insecureServer.AddFrontend(frontend)
-				go insecureServer.RunFrontend(frontend)
+				collection.Applications[appId].Stop()
+				delete(collection.Applications, appId)
 			}
-		} else {
-			// Create / Update / Delete application
+		} else if r.Action == "set" {
+			if strings.Contains(r.Node.Key, "backends") {
+				// Create / Update / Delete backend
+				backend, err := NewBackendFromJson(tmpId, r.Node.Value)
+				if err != nil {
+					log.Printf("Skip backend due error: %s", err)
+					continue
+				}
+				if _, ok := collection.Backends[tmpId]; ok {
+					collection.Applications[appId].DeleteBackend(tmpId)
+				}
+				collection.Backends[tmpId] = backend
+				collection.Applications[appId].AddBackend(backend)
+			} else if strings.Contains(r.Node.Key, "frontends") {
+				// Create / Update / Delete frontend
+				frontend, err := newFrontendFromJson(tmpId, r.Node.Value)
+				if err != nil {
+					log.Printf("Skip frontend %s:%s", appId, tmpId)
+					continue
+				}
+
+				var backendList []Backend
+				for _, back := range collection.Applications[appId].Backends {
+					backendList = append(backendList, back)
+				}
+				frontend.SetBackends(backendList)
+
+				if _, ok := collection.Frontends[tmpId]; ok {
+					collection.Applications[appId].DeleteFrontend(tmpId)
+				}
+				collection.Frontends[tmpId] = frontend
+
+				if frontend.isSecure() {
+					secureServer.AddFrontend(frontend)
+					go secureServer.RunFrontend(frontend)
+				} else {
+					insecureServer.AddFrontend(frontend)
+					go insecureServer.RunFrontend(frontend)
+				}
+			} else {
+				collection.AddApplication(NewApplication(appId))
+			}
 		}
 
 		log.Printf("%s %s %s", tmpId, r.Node.Key, r.Node.Value)
