@@ -36,6 +36,7 @@ func ResolveApps(client *etcd.Client, etcdKey string) (map[string]*Frontend, map
 
 	for _, n := range r.Node.Nodes {
 		appId := n.Key[strings.LastIndex(n.Key, "/")+1:]
+		app := NewApplication(appId)
 
 		backendsEtcd, err := client.Get("/"+etcdKey+"/"+appId+"/backends", true, false)
 		if err != nil {
@@ -56,6 +57,7 @@ func ResolveApps(client *etcd.Client, etcdKey string) (map[string]*Frontend, map
 			}
 
 			backends[appId] = append(backends[appId], backend)
+			app.Backends[backend.Id] = backend
 			collection.Backends[backendId] = backend
 		}
 
@@ -79,12 +81,10 @@ func ResolveApps(client *etcd.Client, etcdKey string) (map[string]*Frontend, map
 			frontend.SetBackends(backends[appId])
 			frontendsApp[appId][frontend.Id] = frontend
 			frontends[frontend.Id] = frontend
+			app.Frontends[frontend.Id] = frontend
 			collection.Frontends[frontendId] = frontend
 		}
 
-		app := NewApplication(appId)
-		app.Frontends = collection.Frontends
-		app.Backends = collection.Backends
 		collection.Applications[appId] = app
 	}
 
@@ -145,11 +145,11 @@ func InitApplications(frontends map[string]*Frontend) (map[string]*Frontend, map
 	return secureFrontends, insecureFrontends
 }
 
-func isBackend(r etcd.Response) bool {
+func isBackend(r *etcd.Response) bool {
 	return strings.Contains(r.Node.Key, "backends")
 }
 
-func isFrontend(r etcd.Response) bool {
+func isFrontend(r *etcd.Response) bool {
 	return strings.Contains(r.Node.Key, "frontends")
 }
 

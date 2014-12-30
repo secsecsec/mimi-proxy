@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 )
 
 func NewApplication(Id string) *Application {
@@ -25,7 +26,7 @@ func (self *Application) Create() (err error) {
 }
 
 func (self *Application) Delete() (err error) {
-	_, err = etcdClient.DeleteDir("/" + config.EtcdKey + "/" + self.Id)
+	_, err = etcdClient.Delete("/"+config.EtcdKey+"/"+self.Id, true)
 	return err
 }
 
@@ -48,13 +49,16 @@ func (s *Application) AddBackend(backend Backend) {
 }
 
 func (s *Application) DeleteBackend(id string) error {
+	log.Printf("Application: delete backend %s: %s", id, s.Backends)
 	if _, ok := s.Backends[id]; ok {
 		delete(s.Backends, id)
-		return nil
-	}
 
-	for _, frontend := range s.Frontends {
-		frontend.DeleteBackend(id)
+		log.Printf("%s", s.Frontends)
+		for _, frontend := range s.Frontends {
+			frontend.DeleteBackend(id)
+		}
+
+		return nil
 	}
 
 	return errors.New(fmt.Sprintf("Unknown backend id: %s", id))

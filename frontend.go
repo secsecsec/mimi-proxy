@@ -66,9 +66,9 @@ func (f *Frontend) AddBackend(backend Backend) {
 	f.strategy.AddBackend(backend)
 }
 
-func (f *Frontend) DeleteBackend(id string) {
-	f.server.Printf("delete backend: %s", id)
-	f.strategy.DeleteBackend(id)
+func (f *Frontend) DeleteBackend(id string) error {
+	f.server.Printf("Delete backend: %s", id)
+	return f.strategy.DeleteBackend(id)
 }
 
 func (f *Frontend) SetBackends(backends []Backend) {
@@ -198,6 +198,7 @@ Location: https://%s
 	backend, err := s.strategy.NextBackend()
 	if err != nil {
 		s.server.Printf("Error: %s", err)
+		c.Close()
 		return nil
 	}
 

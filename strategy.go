@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 )
 
@@ -15,11 +16,6 @@ func (s *RoundRobinStrategy) NextBackend() (Backend, error) {
 
 	if n == 0 {
 		return Backend{}, errors.New("Backends not found. Skipping.")
-	}
-
-	log.Printf("%d", n)
-	for _, b := range s.backends {
-		log.Printf("%v %d %d", b, b.Id, b.Url)
 	}
 
 	if n == 1 {
@@ -38,21 +34,21 @@ func (s *RoundRobinStrategy) SetBackends(backends []Backend) {
 	s.backends = backends
 }
 
-func (s *RoundRobinStrategy) DeleteBackend(id string) {
-	var index int
+func (s *RoundRobinStrategy) DeleteBackend(id string) error {
+	log.Printf("Strategy: delete backend")
 	for i, backend := range s.backends {
 		if backend.Id == id {
-			index = i
-			break
+			s.backends = append(s.backends[:i], s.backends[i+1:]...)
+			return nil
 		}
 	}
 
-	s.backends = append(s.backends[:index], s.backends[index+1:]...)
+	return errors.New(fmt.Sprintf("Unknown backend id: %s", id))
 }
 
 type BackendStrategy interface {
 	NextBackend() (Backend, error)
 	AddBackend(backend Backend)
-	DeleteBackend(id string)
+	DeleteBackend(id string) error
 	SetBackends(backends []Backend)
 }

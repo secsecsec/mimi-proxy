@@ -7,7 +7,6 @@ import (
 	"github.com/mimicloud/easyconfig"
 	"io/ioutil"
 	"os"
-	"time"
 )
 
 const (
@@ -82,21 +81,13 @@ func main() {
 		}
 	}()
 
-	go func() {
-		time.Sleep(3 * time.Second)
-		// collection.Applications["u1"].DeleteBackend("b1")
-
-		// time.Sleep(3 * time.Second)
-		// backend := NewBackend("b2")
-		// backend.Url = "localhost:3000"
-		// collection.Applications["u1"].AddBackend(backend)
-	}()
-
 	// Watch new applications / frontends / backends in etcd server
 	go watchApps(etcdClient, config.EtcdKey, secureServer, insecureServer)
 
 	apiServer := &ApiServer{
 		EnableCheckAlive: true,
+		secureServer:     secureServer,
+		insecureServer:   insecureServer,
 	}
 	apiServer.ListenAndServe(config.ApiServerAddr)
 }
