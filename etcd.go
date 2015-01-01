@@ -162,6 +162,10 @@ func watchApps(client *etcd.Client, etcdKey string, secureServer, insecureServer
 		}
 
 		parts := strings.Split(r.Node.Key, "/")
+		if len(parts) < 2 {
+			log.Printf("Incorrect key, length: %d", len(parts))
+			continue
+		}
 		appId := parts[2]
 		tmpId := r.Node.Key[strings.LastIndex(r.Node.Key, "/")+1:]
 
