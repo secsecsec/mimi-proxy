@@ -109,17 +109,22 @@ func (s *Server) ErrorHandler() {
 			conn, err = s.muxHTTP.NextError()
 		}
 
-		if conn == nil {
-			s.Printf("Failed to mux next connection, error: %v", err)
-			if _, ok := err.(vhost.Closed); ok {
-				return
-			} else {
-				continue
-			}
-		} else {
-			s.Printf("Failed to mux connection from %v, error: %v", conn.RemoteAddr(), err)
-			// XXX: respond with valid TLS close messages
+		switch err.(type) {
+		case vhost.BadRequest:
+			s.Printf("Bad request")
 			conn.Close()
+			return
+		case vhost.NotFound:
+			s.Printf("Unknown vhost")
+			conn.Close()
+			return
+		case vhost.Closed:
+			log.Printf("Connection closed: %s", err)
+			return
+		default:
+			if conn != nil {
+				s.Printf("Server error")
+			}
 		}
 	}
 }
