@@ -126,7 +126,7 @@ func (s *Server) ErrorHandler() {
 			conn.Close()
 			continue
 		case vhost.BadRequest:
-			s.Printf("Bad request")
+			s.Printf("Bad request: %s", err)
 			conn.Close()
 			continue
 		case vhost.Closed:

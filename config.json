@@ -1,7 +1,7 @@
 {
-    "api_server_addr": "127.0.0.1:8586",
-    "insecure_bind_addr": ":80",
-    "secure_bind_addr": ":443",
+    "api_server_addr": "127.0.0.1:8585",
+    "insecure_bind_addr": ":8586",
+    "secure_bind_addr": ":8587",
     "502_error_page": "templates/502_error.html",
     "503_error_page": "templates/503_error.html",
     "etcd_key": "apps",
