@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	vhost "github.com/inconshreveable/go-vhost"
 	"log"
 	"net"
@@ -13,23 +14,25 @@ const (
 	muxTimeout = 10 * time.Second
 )
 
-func NewServer(listen string, secure bool, errorPage string) *Server {
+func NewServer(listen string, secure bool, errorPage502 string, errorPage503 string) *Server {
 	return &Server{
-		Listen:    listen,
-		Secure:    secure,
-		ErrorPage: errorPage,
-		Frontends: make(map[string]*Frontend),
-		Logger:    log.New(os.Stdout, config.SecureBindAddr+" ", log.LstdFlags|log.Lshortfile),
+		Listen:       listen,
+		Secure:       secure,
+		ErrorPage502: errorPage502,
+		ErrorPage503: errorPage503,
+		Frontends:    make(map[string]*Frontend),
+		Logger:       log.New(os.Stdout, config.SecureBindAddr+" ", log.LstdFlags|log.Lshortfile),
 	}
 }
 
 type Server struct {
 	*log.Logger
 
-	Listen    string
-	Secure    bool
-	ErrorPage string
-	Frontends map[string]*Frontend
+	Listen       string
+	Secure       bool
+	ErrorPage502 string
+	ErrorPage503 string
+	Frontends    map[string]*Frontend
 
 	muxTLS  *vhost.TLSMuxer
 	muxHTTP *vhost.HTTPMuxer
@@ -110,20 +113,29 @@ func (s *Server) ErrorHandler() {
 		}
 
 		switch err.(type) {
+		case vhost.NotFound:
+			s.Printf("Unknown vhost")
+			if s.ErrorPage503 != "" {
+				fmt.Fprintf(conn, `HTTP/1.0 503
+	Content-Length: %d
+	Content-Type: text/html; charset=utf-8
+
+	%s
+	`, len(s.ErrorPage503), s.ErrorPage503)
+			}
+			conn.Close()
+			continue
 		case vhost.BadRequest:
 			s.Printf("Bad request")
 			conn.Close()
-			return
-		case vhost.NotFound:
-			s.Printf("Unknown vhost")
-			conn.Close()
-			return
+			continue
 		case vhost.Closed:
 			log.Printf("Connection closed: %s", err)
 			return
 		default:
 			if conn != nil {
 				s.Printf("Server error")
+				conn.Close()
 			}
 		}
 	}

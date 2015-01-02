@@ -22,7 +22,8 @@ var config = struct {
 	Frontends        map[string]*Frontend `json:"frontends"`
 	EtcdKey          string               `json:"etcd_key"`
 	EtcdServers      []string             `json:"etcd_servers"`
-	ErrorPage        string               `json:"error_page"`
+	ErrorPage502     string               `json:"502_error_page"`
+	ErrorPage503     string               `json:"503_error_page"`
 }{}
 
 var etcdClient *etcd.Client
@@ -47,9 +48,16 @@ func init() {
 
 func main() {
 	var err error
-	var errorPage []byte
-	if config.ErrorPage != "" {
-		errorPage, err = ioutil.ReadFile(config.ErrorPage)
+	var errorPage502 []byte
+	var errorPage503 []byte
+	if config.ErrorPage502 != "" {
+		errorPage502, err = ioutil.ReadFile(config.ErrorPage502)
+		if err != nil {
+			panic(err)
+		}
+	}
+	if config.ErrorPage503 != "" {
+		errorPage503, err = ioutil.ReadFile(config.ErrorPage503)
 		if err != nil {
 			panic(err)
 		}
@@ -57,7 +65,7 @@ func main() {
 
 	secureFrontends, insecureFrontends := ResolveApps(etcdClient, config.EtcdKey)
 
-	secureServer := NewServer(config.SecureBindAddr, true, string(errorPage))
+	secureServer := NewServer(config.SecureBindAddr, true, string(errorPage502), string(errorPage503))
 	secureServer.Frontends = secureFrontends
 
 	// Start secure (:443 port) server
@@ -69,7 +77,7 @@ func main() {
 		}
 	}()
 
-	insecureServer := NewServer(config.InsecureBindAddr, false, string(errorPage))
+	insecureServer := NewServer(config.InsecureBindAddr, false, string(errorPage502), string(errorPage503))
 	insecureServer.Frontends = insecureFrontends
 
 	// Start insecure (:80 port) server

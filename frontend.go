@@ -112,14 +112,14 @@ func (s *Frontend) Start() error {
 	}()
 
 	for _, host := range s.Hosts {
-		fl, err := s.prepareHost(host)
+		listener, err := s.prepareHost(host)
 		if err != nil {
 			s.server.Printf("Failed to mux listen: %s", err)
 			return err
 		}
 
 		// proxy the connection to an backend
-		go s.RunHost(host, fl)
+		go s.RunHost(host, listener)
 	}
 
 	s.wait.Wait()
@@ -165,6 +165,7 @@ func (s *Frontend) RunHost(host string, l net.Listener) {
 			if conn != nil {
 				s.server.Printf("Failed to accept new connection for '%v': %v", conn.RemoteAddr())
 			}
+			// TODO 2 continue?
 			if e, ok := err.(net.Error); ok {
 				if e.Temporary() {
 					continue
@@ -206,18 +207,18 @@ Location: https://%s
 	upConn, err := net.DialTimeout("tcp", backend.Url, time.Duration(backend.ConnectTimeout)*time.Millisecond)
 	if err != nil {
 		s.server.Printf("Failed to dial backend connection %v: %v", backend.Url, err)
-		if s.server.ErrorPage != "" {
-			fmt.Fprintf(c, `HTTP/1.0 200
+		if s.server.ErrorPage502 != "" {
+			fmt.Fprintf(c, `HTTP/1.0 502
 Content-Length: %d
 Content-Type: text/html; charset=utf-8
 
 %s
-`, len(s.server.ErrorPage), s.server.ErrorPage)
+`, len(s.server.ErrorPage502), s.server.ErrorPage502)
 		}
 		c.Close()
 		return err
 	}
-	s.server.Printf("Initiated new connection to backend: %v %v", upConn.LocalAddr(), upConn.RemoteAddr())
+	s.server.Printf("Initiated new connection to backend: %s %s", upConn.LocalAddr(), upConn.RemoteAddr())
 
 	// join the connections
 	s.joinConnections(c, upConn)
